@@ -4,6 +4,8 @@
 
 * Data root: "/home/cotai/giang/datasets/VOC-2012"
 
+* Label map: "/home/cotai/giang/semantic_segmentation/misc/label_map.json"
+
 # Lecture outline
 
 ## Coding lecture schedule

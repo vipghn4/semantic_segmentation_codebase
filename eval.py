@@ -9,25 +9,38 @@ import pandas as pd
 import argparse
 
 import torch
+from torchvision import models
+
 from datasets.standard_dataset import StandardDataset
 from metrics import IoU, DICE
 from trainers.utils import logits_to_onehot
+from misc.voc2012_color_map import get_color_map
+
+COLOR_MAP = get_color_map()
+
 
 def visualize(step, images, logits, masks, iou, save_dir):
     r"""Visualize prediction results"""
     os.makedirs(save_dir, exist_ok=True)
-    image = images[0].cpu().numpy().transpose((1, 2, 0))
-    pred_mask = torch.argmax(logits[0], dim=0).cpu().numpy()
+    image = images[0].cpu().numpy()
+    image = (image * 255).transpose((1, 2, 0)).astype(np.uint8)
+    
     mask = masks[0].cpu().numpy()
+    colored_mask = np.zeros_like(image)
+    for color in range(21):
+        colored_mask[mask == color] = COLOR_MAP[color]
 
-    _class = np.unique(mask)[1]
-    image = np.uint8(image * 255)
-    pred_mask = colorize_class_from_mask(pred_mask, _class, (0, 0, 255))
-    mask = colorize_class_from_mask(mask, _class, (0, 255, 0))
+    onehot_pred = logits[0].cpu().numpy()
+    onehot_pred = np.argmax(onehot_pred.transpose(1, 2, 0), axis=-1)
+    colored_onehot_pred = np.zeros_like(image)
+    for color in range(21):
+        colored_onehot_pred[onehot_pred == color] = COLOR_MAP[color]
+    
     visualized_image = np.concatenate([
-        cv2.addWeighted(image, 1, mask, 0.5, 0),
-        cv2.addWeighted(image, 1, pred_mask, 0.5, 0),
-    ])
+        cv2.addWeighted(image, 1, colored_mask, 0.7, 0),
+        cv2.addWeighted(image, 1, colored_onehot_pred, 0.7, 0),
+    ], axis=1)
+    
     cv2.imwrite(os.path.join(save_dir, f"{step}-{iou:.4f}.jpg"), visualized_image)
 
 def colorize_class_from_mask(mask, _class, color):
@@ -50,11 +63,13 @@ if __name__ == "__main__":
     print(args)
 
     # load model
+    from trainers.utils import Logger, bcolors, logits_to_onehot, init_weights
+
     with open(args.model_config_file) as f:
         model_config = json.load(f)
     module = importlib.import_module(args.model_module)
     model = getattr(module, "get_model")(model_config).to(args.device)
-
+    
     # load pretrained weights
     checkpoint_data = torch.load(args.model_weights_file)
     model.load_state_dict(checkpoint_data["model"])
@@ -66,7 +81,7 @@ if __name__ == "__main__":
         label_map_file=args.label_map_file,
         augment_data=None,
         preprocess=None,
-        target_size=(512, 512)
+        target_size=(256, 256)
     ))
     val_dataset = StandardDataset(data_config, split="val")
     val_loader = torch.utils.data.DataLoader(
@@ -86,10 +101,9 @@ if __name__ == "__main__":
         with torch.no_grad():
             logits = model(images)
             onehot_pred_masks = logits_to_onehot(logits)
-            iou = IoU(onehot_pred_masks, masks, onehot_masks)
+            iou = IoU(onehot_pred_masks, onehot_masks)
         
         visualize(step, images, logits, masks, iou.item(), args.save_dir)
         metric_progress.append({"iou": iou.item()})
-        break
     metric_progress = pd.DataFrame(metric_progress)
     metric_progress.to_csv("eval_results.csv")

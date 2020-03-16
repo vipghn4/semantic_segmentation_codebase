@@ -12,6 +12,11 @@ from torchvision import transforms
 import torch.nn.functional as F
 from torch.utils.data.dataset import Dataset
 
+from misc.voc2012_color_map import get_color_map
+from trainers.utils import Logger, bcolors, logits_to_onehot, init_weights
+
+COLOR_MAP = get_color_map(256)
+
 
 class StandardDataset(Dataset):
     def __init__(self, data_config, split="train"):
@@ -120,26 +125,6 @@ class StandardDataset(Dataset):
     def __len__(self):
         r"""Get dataset size"""
         return len(self.items)
-    
-    def __visualize_class(self, image, mask, onehot_mask, _class):
-        r"""Visualize generated data for data verification"""
-        image = (255 * image.numpy().transpose((1, 2, 0))).astype(np.uint8)
-        mask = mask.numpy()
-        onehot_mask = onehot_mask.numpy().transpose((1, 2, 0))
-        
-        if _class in np.unique(mask):
-            mask[mask != _class] = 0
-            mask[mask == _class] = 255
-            mask = np.repeat(mask[..., None], 3, axis=-1).astype(np.uint8)
-            mask[..., [0, 2]] = 0
-            onehot_mask = onehot_mask[..., _class] * 255
-            onehot_mask = np.repeat(onehot_mask[..., None], 3, axis=-1).astype(np.uint8)
-            onehot_mask[..., :-1] = 0
-            vis = np.concatenate([
-                cv2.addWeighted(image, 1, mask, 0.5, 0),
-                cv2.addWeighted(image, 1, onehot_mask, 0.5, 0),
-            ], axis=1)
-            cv2.imwrite(f"tmp/{str(uuid.uuid4())}.jpg", vis)
 
     
 if __name__ == "__main__":
@@ -151,5 +136,31 @@ if __name__ == "__main__":
         target_size=(513, 513)
     ))
     dataset = StandardDataset(data_config, split="train")
+    
+    os.makedirs("tmp/visualization/StandardDataset", exist_ok=True)
+    total_counts = {}
     for i in range(len(dataset)):
-        dataset[i]
+        image, mask, onehot_mask = dataset[i].image, dataset[i].mask, dataset[i].onehot_mask
+        
+        image = image.cpu().numpy()
+        image = (image * 255).transpose((1, 2, 0)).astype(np.uint8)
+        
+        mask = mask.cpu().numpy()
+        colored_mask = np.zeros_like(image)
+        for color in range(21):
+            colored_mask[mask == color] = COLOR_MAP[color]
+        
+        onehot_mask = onehot_mask.cpu().numpy()
+        onehot_mask = np.argmax(onehot_mask.transpose(1, 2, 0), axis=-1)
+        colored_onehot_mask = np.zeros_like(image)
+        for color in range(21):
+            colored_onehot_mask[onehot_mask == color] = COLOR_MAP[color]
+        
+        vis = np.concatenate([
+            cv2.addWeighted(image, 1, colored_mask, 0.7, 0),
+            cv2.addWeighted(image, 1, colored_onehot_mask, 0.7, 0),
+        ], axis=1)
+        
+        cv2.imwrite(f"tmp/visualization/StandardDataset/{i}.jpg", vis)
+        if i == 20:
+            break

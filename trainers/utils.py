@@ -2,6 +2,7 @@ import tensorflow as tf
 import torch
 import torch.nn.functional as F
 
+
 class Logger(object):
     def __init__(self, log_dir):
         r"""Create a summary writer logging to log_dir."""
@@ -35,6 +36,17 @@ class bcolors:
     def log(x):
         return f"{bcolors.BOLD}{bcolors.OKBLUE}{x}{bcolors.ENDC}{bcolors.ENDC}"
 
+
+def init_weights(m):
+    r'''init weights of a layer with xavier initialization'''
+    if type(m) == torch.nn.Linear:
+        torch.nn.init.xavier_uniform_(m.weight)
+        if getattr(m, "bias") is not None:
+            m.bias.data.fill_(0.01)
+    elif type(m) == torch.nn.Conv2d:
+        torch.nn.init.xavier_uniform_(m.weight)
+        if getattr(m, "bias") is not None:
+            m.bias.data.fill_(0.01)
 
 def logits_to_onehot(logits):
     probs = F.softmax(logits, dim=1)

@@ -6,6 +6,20 @@
 
 * Label map: "/home/cotai/giang/semantic_segmentation/misc/label_map.json"
 
+**Test**:
+
+* [x] StandardDataset ~> OK
+
+* [x] Model ~> Bug (UNet implementation is terrible)
+
+**Problem**:
+
+* Mean IoU is not a good way of evaluating a multi-class semantic segmentator
+
+    * Explain: when class-imbalance, i.e. most pixels are background, and the model outputs predict all pixels as background, the IoU is still very high
+
+* Current hardwares of COTAI is too slow to test codebase, i.e. have to train until convergence to see if things go right
+
 # Lecture outline
 
 ## Coding lecture schedule

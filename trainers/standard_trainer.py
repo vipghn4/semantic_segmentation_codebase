@@ -11,11 +11,15 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import models
 
 from datasets.standard_dataset import StandardDataset
 from optimizers import get_quick_optimizer
-from metrics import IoU, DICE
-from trainers.utils import Logger, bcolors, logits_to_onehot
+from metrics import CELoss, IoU, DICE
+from trainers.utils import Logger, bcolors, logits_to_onehot, init_weights
+from misc.voc2012_color_map import get_color_map
+
+COLOR_MAP = get_color_map()
 
 
 class StandardTrainer:
@@ -25,7 +29,7 @@ class StandardTrainer:
         Args:
             train_config (EasyDict): Contain training configuration of VOC-2012 trainer.
                 * model (torch.nn.Module): Segmentation model to train.
-                * loss_func (torch.nn.Module): Loss function used for training. The loss function must take ypred and ytrue, which are torch.FloatTensors and returns a torch.FloatTensor.
+                * loss_func (__callable__): Loss function used for training. The loss function must take ypred and ytrue, which are torch.FloatTensors and returns a torch.FloatTensor.
                 * metric_funcs (dict): Metric functions used for evaluation. The format should be
                 
                 ```
@@ -64,8 +68,8 @@ class StandardTrainer:
 
     def __get_optimizer(self):
         r"""Get optimizer for training segmentation model"""
-        max_iter = self.config.n_epochs * math.ceil(len(self.train_dataset) / self.config.batch_size)
-        optimizer, scheduler = get_quick_optimizer(model, max_iter)
+        max_iter = self.config.n_epochs * math.ceil(len(self.train_loader) / self.config.batch_size)
+        optimizer, scheduler = get_quick_optimizer(model, max_iter, base_lr=1e-4)
         return optimizer, scheduler
 
     def __get_dataloaders(self):
@@ -93,13 +97,13 @@ class StandardTrainer:
         metric_progress = []
         for step, batch in progress_bar:
             images = batch["image"].to(self.config.device)
-            masks, onehot_masks = batch["mask"].to(self.config.device), batch["onehot_mask"].to(self.config.device)
+            onehot_masks = batch["onehot_mask"].to(self.config.device)
             
             logits = self.model(images)
-            loss = self.loss_func(logits, masks)
+            loss = self.loss_func(logits, onehot_masks)
             
             onehot_pred_masks = logits_to_onehot(logits)
-            metrics = {metric: self.metric_funcs[metric](onehot_pred_masks, masks, onehot_masks) for metric in self.metric_funcs}
+            metrics = {metric: self.metric_funcs[metric](onehot_pred_masks, onehot_masks) for metric in self.metric_funcs}
             self.__update_model_params(loss)
 
             metric_progress.append(self.__parse_metrics(loss, metrics))
@@ -122,14 +126,14 @@ class StandardTrainer:
         metric_progress = []
         for step, batch in progress_bar:
             images = batch["image"].to(self.config.device)
-            masks, onehot_masks = batch["mask"].to(self.config.device), batch["onehot_mask"].to(self.config.device)
+            onehot_masks = batch["onehot_mask"].to(self.config.device)
             
             with torch.no_grad():
                 logits = self.model(images)
-                loss = self.loss_func(logits, masks)
+                loss = self.loss_func(logits, onehot_masks)
                 
                 onehot_pred_masks = logits_to_onehot(logits)
-                metrics = {metric: self.metric_funcs[metric](onehot_pred_masks, masks, onehot_masks) for metric in self.metric_funcs}
+                metrics = {metric: self.metric_funcs[metric](onehot_pred_masks, onehot_masks) for metric in self.metric_funcs}
             
             metric_progress.append(self.__parse_metrics(loss, metrics))
             metrics = self.__get_mean(metric_progress)
@@ -183,7 +187,7 @@ class StandardTrainer:
         desc = f"{phase} epoch {epoch}/{self.config.n_epochs} step {step}: "
         for metric in metrics:
             metric_value = metrics[metric]
-            desc += f"{metric}: {metric_value} "
+            desc += f"{metric}: {metric_value:.4f} "
         progress_bar.set_description(desc)
 
 
@@ -201,22 +205,23 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda:0", help="Device used for training and inference")
     args = parser.parse_args()
     print(args)
-
+    
     with open(args.model_config_file) as f:
         model_config = json.load(f)
     module = importlib.import_module(args.model_module)
     model = getattr(module, "get_model")(model_config).to(args.device)
+    model.apply(init_weights)
     
     data_config = EasyDict(dict(
         data_root=args.data_root,
         label_map_file=args.label_map_file,
         augment_data=None,
         preprocess=None,
-        target_size=(512, 512)
+        target_size=(256, 256)
     ))
     train_config = EasyDict(dict(
         model=model,
-        loss_func=nn.CrossEntropyLoss(ignore_index=21),
+        loss_func=CELoss,
         metric_funcs={"iou": IoU, "dice": DICE},
         n_epochs=args.n_epochs,
         data_config=data_config,

@@ -6,19 +6,158 @@
 
 * Label map: "/home/cotai/giang/semantic_segmentation/misc/label_map.json"
 
-**Test**:
+## 16/03/2020
+
+**Test**: PASSED
 
 * [x] StandardDataset ~> OK
 
-* [x] Model ~> Bug (UNet implementation is terrible)
+* [x] Model ~> Bug (open-source UNet implementation is terrible)
 
-**Problem**:
+**Problems**:
 
-* Mean IoU is not a good way of evaluating a multi-class semantic segmentator
+* Problems with VOC-2012 dataset:
+    
+    * Mean IoU is not a good way of evaluating a multi-class semantic segmentator
 
-    * Explain: when class-imbalance, i.e. most pixels are background, and the model outputs predict all pixels as background, the IoU is still very high
+        * Explain: when class-imbalance, i.e. most pixels are background, and the model outputs predict all pixels as background, the IoU is still very high
+    
+    * VOC-2012 dataset is strongly imbalanced and difficult
 
-* Current hardwares of COTAI is too slow to test codebase, i.e. have to train until convergence to see if things go right
+* Other problems:
+
+    * Current hardwares of COTAI is too slow to test codebase, i.e. have to train until convergence to see if things go right
+
+**Solutions**:
+
+* Find a small-and-easy dataset for quick experimenting
+
+* Only focus on easy problems, not hard ones due to limtied hardware capacity
+
+## 17/03/2020
+
+**Notes**: https://github.com/tensorflow/models/blob/master/research/deeplab/train.py#L406
+
+* Pipeline from https://github.com/tensorflow/models/blob/master/research/deeplab/train.py#L273
+    
+    1. Build dataset for patchwise training and whole-image inference, with augmentation, i.e. random scale >>> random crop >>> random vertical flip
+    
+    2. Build DeeplabV3 head with CELoss with hard example mining, class weights
+    
+    3. Get learning rate scheduler, including slow-start lr scheduler and ordinary scheduler
+    
+    4. Get optimizer, either momentum (in paper) or adam
+    
+    5. If transfer learning from classification task, multiple gradients of last layer(s) by some constant to enlarge the gradients
+
+* Deeplab use multi-scale CELoss
+    
+    * Link: https://github.com/tensorflow/models/blob/28f6182fc9afaf11104a5abe7c21b57b6aeb30e2/research/deeplab/utils/train_utils.py#L33
+
+    * Transform mask:
+    
+    ```
+    scaled_labels = tf.image.resize_nearest_neighbor(
+          labels,
+          preprocess_utils.resolve_shape(logits, 4)[1:3],
+          align_corners=True
+    )
+    scaled_labels = tf.reshape(scaled_labels, shape=[-1])
+    
+    weights = utils.get_label_weight_mask(scaled_labels, ignore_label, num_classes, label_weights=loss_weight)
+    keep_mask = tf.cast(tf.not_equal(scaled_labels, ignore_label), dtype=tf.float32)
+    
+    if gt_is_matting_map:
+        # When the groundtruth is integer label mask, we can assign class
+        # dependent label weights to the loss. When the groundtruth is image
+        # matting confidence, we do not apply class-dependent label weight (i.e.,
+        # label_weight = 1.0).
+        if loss_weight != 1.0:
+            raise ValueError('loss_weight must equal to 1 if groundtruth is matting map.')
+
+        # Assign label value 0 to ignore pixels. The exact label value of ignore
+        # pixel does not matter, because those ignore_value pixel losses will be
+        # multiplied to 0 weight.
+        train_labels = scaled_labels * keep_mask
+
+        train_labels = tf.expand_dims(train_labels, 1)
+        train_labels = tf.concat([1 - train_labels, train_labels], axis=1)
+    else:
+        train_labels = tf.one_hot(caled_labels, num_classes, on_value=1.0, off_value=0.0)
+    ```
+    
+    * Only focus on top-K hard pixels (hard example mining) for initial training steps and gradually sample less hard pixels (i.e. loss sampling):
+    
+    ```
+    if top_k_percent_pixels == 1.0:
+        total_loss = tf.reduce_sum(weighted_pixel_losses)
+        num_present = tf.reduce_sum(keep_mask)
+        loss = _div_maybe_zero(total_loss, num_present)
+        tf.losses.add_loss(loss)
+    else:
+        num_pixels = tf.to_float(tf.shape(logits)[0])
+        # Compute the top_k_percent pixels based on current training step.
+        if hard_example_mining_step == 0:
+            # Directly focus on the top_k pixels.
+            top_k_pixels = tf.to_int32(top_k_percent_pixels * num_pixels)
+        else:
+            # Gradually reduce the mining percent to top_k_percent_pixels.
+            global_step = tf.to_float(tf.train.get_or_create_global_step())
+            ratio = tf.minimum(1.0, global_step / hard_example_mining_step)
+            top_k_pixels = tf.to_int32((ratio * top_k_percent_pixels + (1.0 - ratio)) * num_pixels)
+        top_k_losses, _ = tf.nn.top_k(weighted_pixel_losses,
+                                    k=top_k_pixels,
+                                    sorted=True,
+                                    name='top_k_percent_pixels')
+        total_loss = tf.reduce_sum(top_k_losses)
+        num_present = tf.reduce_sum(
+            tf.to_float(tf.not_equal(top_k_losses, 0.0)))
+        loss = _div_maybe_zero(total_loss, num_present)
+        tf.losses.add_loss(loss)
+    ```
+
+* DeeplabV3 first trained with SlowStartLRScheduler then PolyLRScheduler or some other LR Scheduler
+
+    * Link: https://github.com/tensorflow/models/blob/28f6182fc9afaf11104a5abe7c21b57b6aeb30e2/research/deeplab/utils/train_utils.py#L268
+
+* DeeplabV3 uses MomentumOptimizer or AdamOptimizer
+
+* The gradient multipliers will adjust the learning rates for model variables. For the task of semantic segmentation, the models are usually fine-tuned from the models trained on the task of image classification. To fine-tune the models, we usually set larger (e.g., 10 times larger) learning rate for the parameters of last layer(s).
+
+    * Pipeline: 
+
+        1. Compute loss
+
+        2. Compute gradient multipliers (if transfer learning from classification task) and multiply gradients with gradient multipliers
+
+        3. Update Gradient descent
+
+    * Example code:
+    
+    ```
+    with tf.device(config.variables_device()):
+        total_loss, grads_and_vars = model_deploy.optimize_clones(clones, optimizer)
+        total_loss = tf.check_numerics(total_loss, 'Loss is inf or nan.')
+        summaries.add(tf.summary.scalar('total_loss', total_loss))
+
+        # Modify the gradients for biases and last layer variables.
+        last_layers = model.get_extra_layer_scopes(FLAGS.last_layers_contain_logits_only)
+        grad_mult = train_utils.get_model_gradient_multipliers(last_layers, FLAGS.last_layer_gradient_multiplier)
+        if grad_mult:
+            grads_and_vars = slim.learning.multiply_gradients(grads_and_vars, grad_mult)
+
+        # Create gradient update op.
+        grad_updates = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
+        update_ops.append(grad_updates)
+        update_op = tf.group(*update_ops)
+        with tf.control_dependencies([update_op]):
+            train_tensor = tf.identity(total_loss, name='train_op')
+    ```
+    
+
+**Test**:
+
+* [ ] DeeplabV3Augmentator
 
 # Lecture outline
 

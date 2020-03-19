@@ -106,4 +106,4 @@ if __name__ == "__main__":
         visualize(step, images, logits, masks, iou.item(), args.save_dir)
         metric_progress.append({"iou": iou.item()})
     metric_progress = pd.DataFrame(metric_progress)
-    metric_progress.to_csv("eval_results.csv")
+    metric_progress.to_csv(os.path.join(save_dir, "eval_results.csv"))

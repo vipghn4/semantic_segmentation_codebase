@@ -78,14 +78,13 @@ class StandardDataset(Dataset):
     
     def __getitem__(self, idx):
         r"""Get an item with index `idx` from the dataset"""
-        image = cv2.imread(self.items[idx].image_path)
-        mask = np.array(Image.open(self.items[idx].mask_path))
-        mask[mask == 255] = 21
-        image, mask = self.__resize_items(image, mask)
+        original_image = cv2.imread(self.items[idx].image_path)
+        original_mask = np.array(Image.open(self.items[idx].mask_path))
+        original_mask[original_mask == 255] = 21
         
+        image, mask = original_image.copy(), original_mask.copy()
         if self.config.augment_data is not None:
             image, mask = self.config.augment_data(image, mask)
-        
         if self.config.preprocess is not None:
             image, mask = self.config.preprocess(image, mask)
         
@@ -93,6 +92,7 @@ class StandardDataset(Dataset):
         mask = self.__get_mask_tensor(mask)
         onehot_mask = self.__get_onehot_mask(mask)        
         return EasyDict(dict(
+            original_image=original_image, original_mask=original_mask,
             image=image, mask=mask, onehot_mask=onehot_mask
         ))
     
@@ -108,25 +108,24 @@ class StandardDataset(Dataset):
         onehot_mask = onehot_mask[:-1]
         return onehot_mask
 
-    def __resize_items(self, image, mask):
-        r"""Pad and resize image and mask"""
-        padded_shape = (int(max(image.shape[1], image.shape[0] * self.config.target_size[0] / self.config.target_size[1])), 
-                        int(max(image.shape[0], image.shape[1] * self.config.target_size[1] / self.config.target_size[0])))
-        pad_left = (padded_shape[0] - image.shape[1]) // 2
-        pad_right = padded_shape[0] - image.shape[1] - pad_left
-        pad_top = (padded_shape[1] - image.shape[0]) // 2
-        pad_bottom = padded_shape[1] - image.shape[0] - pad_top
-        image = np.pad(image, ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)), mode="constant")
-        mask = np.pad(mask, ((pad_top, pad_bottom), (pad_left, pad_right)), mode="constant")
-        image = cv2.resize(image, tuple(self.config.target_size), interpolation=cv2.INTER_CUBIC)
-        mask = cv2.resize(mask, tuple(self.config.target_size), interpolation=cv2.INTER_NEAREST)
-        return image, mask
-
     def __len__(self):
         r"""Get dataset size"""
         return len(self.items)
 
-    
+
+def preprocess(image, mask, **kwargs):
+    r"""Preprocess image and mask for VOC-2012 dataset. Default mean-subtraction is performed. Please specify a model_variant.
+
+    Args:
+        image (np.array): BGR image of shape (h, w, c)
+        mask (np.array): np.array of shape (h, w)
+    Returns:
+        np.array: Preprocessed BGR image
+        np.array: Preprocessed mask
+    """
+    return image, mask
+
+
 if __name__ == "__main__":
     data_config = EasyDict(dict(
         data_root="/home/cotai/giang/datasets/VOC-2012",

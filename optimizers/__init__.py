@@ -1,4 +1,5 @@
 import torch
+from optimizers.slow_start_lr_deeplabv3_scheduler import SlowStartDeeplabV3Scheduler
 
 
 def get_segmentation_optimizer(model, max_iter, base_lr=0.001, power=0.9):

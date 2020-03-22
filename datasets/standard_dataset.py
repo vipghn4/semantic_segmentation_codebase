@@ -10,10 +10,9 @@ from PIL import Image
 import torch
 from torchvision import transforms
 import torch.nn.functional as F
-from torch.utils.data.dataset import Dataset
+from torch.utils.data.dataset import Dataset, ConcatDataset
 
 from misc.voc2012_color_map import get_color_map
-from trainers.utils import Logger, bcolors, logits_to_onehot, init_weights
 
 COLOR_MAP = get_color_map(256)
 
@@ -45,6 +44,7 @@ class StandardDataset(Dataset):
 
                 leave this `None` if there is no preprocessing step.
                 * target_size (tuple of 2 ints): The target size of images and masks of the dataset. The format is (w, h).
+                * ignored_class (int): The integer used to assign to ignored class 
             split (str): Which split of the dataset to collect. This can be either "train", "trainval", or "val". Default "train".
         
         `data_config.augment_data` will be invoked before `data_config.preprocess`
@@ -80,17 +80,18 @@ class StandardDataset(Dataset):
         r"""Get an item with index `idx` from the dataset"""
         original_image = cv2.imread(self.items[idx].image_path)
         original_mask = np.array(Image.open(self.items[idx].mask_path))
-        original_mask[original_mask == 255] = 21
+        original_mask[original_mask == 255] = self.config.ignored_class
         
         image, mask = original_image.copy(), original_mask.copy()
         if self.config.augment_data is not None:
             image, mask = self.config.augment_data(image, mask)
+        
         if self.config.preprocess is not None:
             image, mask = self.config.preprocess(image, mask)
-        
+                
         image = self.to_tensor(image)
         mask = self.__get_mask_tensor(mask)
-        onehot_mask = self.__get_onehot_mask(mask)        
+        onehot_mask = self.__get_onehot_mask(mask)
         return EasyDict(dict(
             original_image=original_image, original_mask=original_mask,
             image=image, mask=mask, onehot_mask=onehot_mask
@@ -132,14 +133,15 @@ if __name__ == "__main__":
         label_map_file="/home/cotai/giang/datasets/VOC-2012/label_map.json",
         augment_data=None,
         preprocess=None,
-        target_size=(513, 513)
+        target_size=(512, 512),
+        ignored_class=21
     ))
     dataset = StandardDataset(data_config, split="train")
     
     os.makedirs("tmp/visualization/StandardDataset", exist_ok=True)
-    total_counts = {}
     for i in range(len(dataset)):
-        image, mask, onehot_mask = dataset[i].image, dataset[i].mask, dataset[i].onehot_mask
+        item = dataset[i]
+        image, mask, onehot_mask = item.image, item.mask, item.onehot_mask
         
         image = image.cpu().numpy()
         image = (image * 255).transpose((1, 2, 0)).astype(np.uint8)

@@ -1,0 +1,1 @@
+from augmentators.deeplabv3_augmentator import DeeplabV3Augmentator

@@ -153,11 +153,142 @@
         with tf.control_dependencies([update_op]):
             train_tensor = tf.identity(total_loss, name='train_op')
     ```
-    
 
 **Test**:
 
 * [ ] DeeplabV3Augmentator
+
+## 18/03/2020
+
+**Notes**: https://github.com/CSAILVision/semantic-segmentation-pytorch
+
+* Optimizer: uses different optimizers for encoder and decoder
+
+    * Both optimizers are SGD
+    
+    * Only apply weight decay for weights of nn.Linear nn.Conv2d, their biases terms has no weight decay, and BN layer has no weight decay
+    
+    * Base LR is 0.02
+    
+    * Example code:
+    
+    ```
+    def group_weight(module):
+        group_decay = []
+        group_no_decay = []
+        for m in module.modules():
+            if isinstance(m, nn.Linear):
+                group_decay.append(m.weight)
+                if m.bias is not None:
+                    group_no_decay.append(m.bias)
+            elif isinstance(m, nn.modules.conv._ConvNd):
+                group_decay.append(m.weight)
+                if m.bias is not None:
+                    group_no_decay.append(m.bias)
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                if m.weight is not None:
+                    group_no_decay.append(m.weight)
+                if m.bias is not None:
+                    group_no_decay.append(m.bias)
+
+        assert len(list(module.parameters())) == len(group_decay) + len(group_no_decay)
+        groups = [dict(params=group_decay), dict(params=group_no_decay, weight_decay=.0)]
+        return groups
+
+
+    def create_optimizers(nets, cfg):
+        (net_encoder, net_decoder, crit) = nets
+        optimizer_encoder = torch.optim.SGD(
+            group_weight(net_encoder),
+            lr=cfg.TRAIN.lr_encoder,
+            momentum=cfg.TRAIN.beta1,
+            weight_decay=cfg.TRAIN.weight_decay)
+        optimizer_decoder = torch.optim.SGD(
+            group_weight(net_decoder),
+            lr=cfg.TRAIN.lr_decoder,
+            momentum=cfg.TRAIN.beta1,
+            weight_decay=cfg.TRAIN.weight_decay)
+        return (optimizer_encoder, optimizer_decoder)
+    ```
+    
+* Init weights
+    
+    * Init method:
+    
+    ```
+    def weights_init(m):
+        classname = m.__class__.__name__
+        if classname.find('Conv') != -1:
+            nn.init.kaiming_normal_(m.weight.data)
+        elif classname.find('BatchNorm') != -1:
+            m.weight.data.fill_(1.)
+            m.bias.data.fill_(1e-4)
+    ```
+
+* Model
+    
+    * Use Deep supervision (i.e. auxiliary loss)
+    
+    ```
+    if self.deep_sup_scale is not None: # use deep supervision technique
+        (pred, pred_deepsup) = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True))
+    else:
+        pred = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True))
+
+    loss = self.crit(pred, feed_dict['seg_label'])
+    if self.deep_sup_scale is not None:
+        loss_deepsup = self.crit(pred_deepsup, feed_dict['seg_label'])
+        loss = loss + loss_deepsup * self.deep_sup_scale
+    ```
+    
+    * Loss function: only NLLLoss from PyTorch
+    * Metric: Pixel accuracy (for training)
+    
+    ```
+    def pixel_acc(self, pred, label):
+        _, preds = torch.max(pred, dim=1)
+        valid = (label >= 0).long()
+        acc_sum = torch.sum(valid * (preds == label).long())
+        pixel_sum = torch.sum(valid)
+        acc = acc_sum.float() / (pixel_sum.float() + 1e-10)
+        return acc
+    ```
+
+* Metric during evaluation
+
+```
+def accuracy(preds, label):
+    valid = (label >= 0)
+    acc_sum = (valid * (preds == label)).sum()
+    valid_sum = valid.sum()
+    acc = float(acc_sum) / (valid_sum + 1e-10)
+    return acc, valid_sum
+
+
+def intersectionAndUnion(imPred, imLab, numClass):
+    imPred = np.asarray(imPred).copy()
+    imLab = np.asarray(imLab).copy()
+
+    imPred += 1
+    imLab += 1
+    # Remove classes from unlabeled pixels in gt image.
+    # We should not penalize detections in unlabeled portions of the image.
+    imPred = imPred * (imLab > 0)
+
+    # Compute area intersection:
+    intersection = imPred * (imPred == imLab)
+    (area_intersection, _) = np.histogram(
+        intersection, bins=numClass, range=(1, numClass))
+
+    # Compute area union:
+    (area_pred, _) = np.histogram(imPred, bins=numClass, range=(1, numClass))
+    (area_lab, _) = np.histogram(imLab, bins=numClass, range=(1, numClass))
+    area_union = area_pred + area_lab - area_intersection
+
+    return (area_intersection, area_union)
+```
+
+**Note**: https://github.com/mrgloom/awesome-semantic-segmentation
 
 # Lecture outline
 

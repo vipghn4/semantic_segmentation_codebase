@@ -3,6 +3,51 @@ import torch
 import torch.nn.functional as F
 
 
+class AverageMeter(object):
+    r"""Average Meter implemented by MIT CSAIL. Computes and stores the average and current value"""
+    def __init__(self):
+        self.initialized = False
+        self.val = None
+        self.avg = None
+        self.sum = None
+        self.count = None
+
+    def update(self, val, weight=1):
+        r"""Append a new value to the AverageMeter
+        
+        Args:
+            val (object): Initial value.
+            weight (float): Weight assigned to the initial value to carry out average and summation.
+        """
+        if not self.initialized:
+            self.initialize(val, weight)
+        else:
+            self.add(val, weight)
+
+    def __initialize(self, val, weight):
+        r"""Initialize Average meter by a value"""
+        self.val = val
+        self.avg = val
+        self.sum = val * weight
+        self.count = weight
+        self.initialized = True
+
+    def __add(self, val, weight):
+        r"""Append a value to AverageMeter"""
+        self.val = val
+        self.sum += val * weight
+        self.count += weight
+        self.avg = self.sum / self.count
+
+    def value(self):
+        r"""Get current value"""
+        return self.val
+
+    def average(self):
+        r"""Get average value"""
+        return self.avg
+
+
 class Logger(object):
     def __init__(self, log_dir):
         r"""Create a summary writer logging to log_dir."""

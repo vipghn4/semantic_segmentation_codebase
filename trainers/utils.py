@@ -20,9 +20,9 @@ class AverageMeter(object):
             weight (float): Weight assigned to the initial value to carry out average and summation.
         """
         if not self.initialized:
-            self.initialize(val, weight)
+            self.__initialize(val, weight)
         else:
-            self.add(val, weight)
+            self.__add(val, weight)
 
     def __initialize(self, val, weight):
         r"""Initialize Average meter by a value"""
@@ -81,17 +81,6 @@ class bcolors:
     def log(x):
         return f"{bcolors.BOLD}{bcolors.OKBLUE}{x}{bcolors.ENDC}{bcolors.ENDC}"
 
-
-def init_weights(m):
-    r'''init weights of a layer with xavier initialization'''
-    if type(m) == torch.nn.Linear:
-        torch.nn.init.xavier_uniform_(m.weight)
-        if getattr(m, "bias") is not None:
-            m.bias.data.fill_(0.01)
-    elif type(m) == torch.nn.Conv2d:
-        torch.nn.init.xavier_uniform_(m.weight)
-        if getattr(m, "bias") is not None:
-            m.bias.data.fill_(0.01)
 
 def logits_to_onehot(logits):
     probs = F.softmax(logits, dim=1)

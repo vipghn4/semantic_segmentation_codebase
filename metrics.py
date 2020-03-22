@@ -9,16 +9,54 @@ def CELoss(y_pred, onehot_masks, eps=1e-9):
 
     Args:
         y_pred (torch.tensor): Model prediction, which is a tensor of shape (n_samples, n_class, h, w).
-        masks (torch.tensor): Groundtruth, which is a tensor of shape (n_samples, n_class, h, w).
+        onehot_masks (torch.tensor): Groundtruth, which is a tensor of shape (n_samples, n_class, h, w).
     Returns
-        torch.tensor: (float) loss value
+        torch.tensor: (float) loss value.
     """
     y_pred = F.softmax(y_pred, dim=1)
     loss = torch.sum(- onehot_masks * torch.log(y_pred + eps), dim=1).mean()
     return loss
 
+def pixel_acc(self, y_pred, onehot_masks):
+    r"""Compute pixel accuracy of segmentation result
+
+    Args:
+        y_pred (torch.tensor): Model prediction, which is a tensor of shape (n_samples, n_class, h, w).
+        onehot_masks (torch.tensor): Groundtruth, which is a tensor of shape (n_samples, n_class, h, w).
+    Returns
+        torch.tensor: (float) pixel accuracy value.
+    """
+    preds = torch.argmax(y_pred, axis=1)
+    label = torch.argmax(onehot_masks, axis=1)
+    acc_sum = torch.sum((preds == label).long())
+    pixel_sum = label.numel()
+    acc = acc_sum.float() / (pixel_sum.float() + 1e-10)
+    return acc
+
+def intersectionAndUnion(y_pred, onehot_masks):
+    r"""Compute intersection and union of prediction and target.
+
+    Args:
+        y_pred (torch.tensor): Model prediction, which is a tensor of shape (n_samples, n_class, h, w).
+        onehot_masks (torch.tensor): Groundtruth, which is a tensor of shape (n_samples, n_class, h, w).
+    Returns
+        torch.tensor: FloatTensor of shape (n_samples, n_class), which is the intersection values.
+        torch.tensor: FloatTensor of shape (n_samples, n_class), which is the union values.
+    """
+    y_pred, y_true = y_pred.float(), onehot_masks.float()
+    intersection = (y_true * y_pred).sum((2, 3))
+    union = y_true.sum((2, 3)) + y_pred.sum((2, 3)) - intersection
+    return intersection, union
+
 def IoU(y_pred, onehot_masks, threshold=0.5, eps=1e-9):
-    r'''Compute mean IoU using prediction and target'''
+    r"""Compute mean IoU using prediction and target.
+
+    Args:
+        y_pred (torch.tensor): Model prediction, which is a tensor of shape (n_samples, n_class, h, w).
+        onehot_masks (torch.tensor): Groundtruth, which is a tensor of shape (n_samples, n_class, h, w).
+    Returns
+        torch.tensor: (float) IoU value.
+    """
     y_pred, y_true = y_pred.float(), onehot_masks.float()
     intersection = (y_true * y_pred).sum((2, 3))
     union = y_true.sum((2, 3)) + y_pred.sum((2, 3)) - intersection
@@ -26,7 +64,14 @@ def IoU(y_pred, onehot_masks, threshold=0.5, eps=1e-9):
     return iou.mean()
 
 def DICE(y_pred, onehot_masks, threshold=0.5, eps=1e-9):
-    r'''Compute mean DICE using prediction and target'''
+    r"""Compute mean DICE using prediction and target.
+    
+    Args:
+        y_pred (torch.tensor): Model prediction, which is a tensor of shape (n_samples, n_class, h, w).
+        onehot_masks (torch.tensor): Groundtruth, which is a tensor of shape (n_samples, n_class, h, w).
+    Returns
+        torch.tensor: (float) DICE value.
+    """
     y_pred, y_true = y_pred.float(), onehot_masks.float()
     intersection = (y_true * y_pred).sum((2, 3))
     union = y_true.sum((2, 3)) + y_pred.sum((2, 3))

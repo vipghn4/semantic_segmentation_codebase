@@ -92,10 +92,7 @@ class StandardDataset(Dataset):
         image = self.to_tensor(image)
         mask = self.__get_mask_tensor(mask)
         onehot_mask = self.__get_onehot_mask(mask)
-        return EasyDict(dict(
-            original_image=original_image, original_mask=original_mask,
-            image=image, mask=mask, onehot_mask=onehot_mask
-        ))
+        return EasyDict(dict(image=image, mask=mask, onehot_mask=onehot_mask))
     
     def __get_mask_tensor(self, mask):
         r"""Convert ndarray mask to torch.tensor mask"""
@@ -104,7 +101,7 @@ class StandardDataset(Dataset):
     
     def __get_onehot_mask(self, mask):
         r"""Get onehot mask from integer mask"""
-        onehot_mask = F.one_hot(mask)
+        onehot_mask = F.one_hot(mask, num_classes=22)
         onehot_mask = onehot_mask.permute(2, 0, 1)
         onehot_mask = onehot_mask[:-1]
         return onehot_mask

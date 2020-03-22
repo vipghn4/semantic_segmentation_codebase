@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from optimizers.utils import hard_pixel_loss_sampling
+
 
 def CELoss(y_pred, onehot_masks, eps=1e-9):
     r"""Compute Cross-Entropy loss.
@@ -14,7 +16,8 @@ def CELoss(y_pred, onehot_masks, eps=1e-9):
         torch.tensor: (float) loss value.
     """
     y_pred = F.softmax(y_pred, dim=1)
-    loss = torch.sum(- onehot_masks * torch.log(y_pred + eps), dim=1).mean()
+    cross_entropy = - onehot_masks * torch.log(y_pred + eps)
+    loss = torch.sum(cross_entropy, dim=1).mean()
     return loss
 
 def accuracy(y_pred, onehot_masks):

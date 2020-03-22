@@ -1,5 +1,21 @@
+import torch
 import torch.nn as nn
 
+
+def hard_pixel_loss_sampling(loss, k=100):
+    r"""Hard pixel loss-sampling.
+    
+    Reference: https://github.com/tensorflow/models/blob/28f6182fc9afaf11104a5abe7c21b57b6aeb30e2/research/deeplab/utils/train_utils.py#L33
+    
+    Args:
+        loss (torch.tensor): The loss tensor, from which losses are sampled. This is a tensor of shape (n_samples, n_classes, ...)
+        k (int): Number of loss samples to return.
+    Returns:
+        torch.tensor: Tensor of shape (n_samples, n_classes, k). This is the sampled pixels.
+    """
+    loss = loss.reshape((loss.shape[0], loss.shape[1], -1))
+    top_k_pixels, _ = torch.topk(loss, k)
+    return top_k_pixels
 
 def MIT_group_weight(module):
     r"""MIT CSAIL group weighting, i.e. weight decay and not weight decay. In this setting, only weight matrices of nn.Linear or nn.conv._ConvNd is applied weight decay.

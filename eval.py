@@ -1,23 +1,103 @@
 import os
-import json
 import importlib
-from easydict import EasyDict
-from tqdm import tqdm
+import json
 import numpy as np
 import cv2
-import pandas as pd
+import torch
+from tqdm import tqdm
+from easydict import EasyDict
 import argparse
 
-import torch
-from torchvision import models
-
 from datasets.standard_dataset import StandardDataset
-from metrics import IoU, DICE
-from trainers.utils import logits_to_onehot
+from metrics import CELoss, accuracy, pixel_acc, IoU, DICE, intersectionAndUnion
+from trainers.utils import AverageMeter, Logger, bcolors, logits_to_onehot
 from misc.voc2012_color_map import get_color_map
 
 COLOR_MAP = get_color_map()
 
+
+class StandardEvaluator:
+    def __init__(self, eval_config):
+        r"""Standard Evaluator class for evaluating a segmentation model with VOC-2012 dataset.
+        
+        Args:
+            train_config (EasyDict): Contain evaluation configuration of VOC-2012 trainer.
+                * model (torch.nn.Module): Segmentation model to evaluate.
+                * data_config (EasyDict): Contain configuration of VOC-2012 dataset to pass into StandardDataset (see its docstring for more details).
+                * num_workers (int): Number of workers to be invoked for loading data.
+                * device (str): Device dedicated for training, e.g. "cpu", "cuda:0", etc.
+        """
+        self.config = eval_config
+        self.model = self.config.model
+        self.dataset, self.dataloader = self.__get_dataloaders()
+    
+    def __get_dataloaders(self):
+        r"""Get DataLoader for validation sets"""
+        dataset = StandardDataset(self.config.data_config, split="val")
+        dataloader = torch.utils.data.DataLoader(
+            dataset=dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=self.config.num_workers
+        )
+        return dataset, dataloader
+
+    def evaluate(self):
+        r"""Evaluate a model with a specific dataset"""
+        avg_meters = self.__get_average_meter()
+        self.model.eval()
+
+        progress_bar = tqdm(enumerate(self.dataloader), total=len(self.dataloader))
+        for step, batch in progress_bar:
+            images = batch["image"].to(self.config.device)
+            masks = batch["mask"].to(self.config.device)
+            onehot_masks = batch["onehot_mask"].to(self.config.device)
+            
+            with torch.no_grad():
+                logits = self.model(images)
+                onehot_pred_masks = logits_to_onehot(logits)
+
+                acc, pix = accuracy(onehot_pred_masks, onehot_masks)
+                intersection, union = intersectionAndUnion(onehot_pred_masks, onehot_masks)
+            
+            self.__update_average_meters(avg_meters, 
+                                         acc.cpu().numpy(), pix, 
+                                         intersection.cpu().numpy(), 
+                                         union.cpu().numpy())
+            self.__display_progress_bar(progress_bar, "Val", 1, step, avg_meters)
+        
+            if self.config.save_dir is not None and step < 30:
+                visualize(step, images, logits, masks, acc.cpu().numpy(), self.config.save_dir)
+
+        acc = avg_meters["acc"].average()
+        iou = avg_meters["intersection"].sum / (avg_meters["union"].sum + 1e-10)
+        for i, _iou in enumerate(iou):
+            print(f"class {i}, IoU: {_iou}")
+        
+        print("Eval summary")
+        print(f"\tMean IoU {iou.mean()}")
+        print(f"\tAccuracy: {100*acc}%")
+
+    def __get_average_meter(self):
+        r"""Get AverageMeter(s) for evaluation"""
+        avg_meters = {
+            "acc": AverageMeter(),
+            "intersection": AverageMeter(), 
+            "union": AverageMeter()
+        }
+        return avg_meters
+    
+    def __update_average_meters(self, meter, acc, pix, intersection, union):
+        r"""Update AverageMeter"""
+        meter["acc"].update(acc, pix)
+        meter["intersection"].update(intersection)
+        meter["union"].update(union)
+    
+    def __display_progress_bar(self, progress_bar, phase, epoch, step, meter):
+        r"""Display progress bar"""
+        acc = meter["acc"].average()
+        desc = f"{phase} step {step}: acc {acc:.4f}"
+        progress_bar.set_description(desc)
 
 def visualize(step, images, logits, masks, iou, save_dir):
     r"""Visualize prediction results"""
@@ -49,6 +129,22 @@ def colorize_class_from_mask(mask, _class, color):
     colored_mask[mask == _class] = color
     return colored_mask
 
+def preprocess(image, mask, ignored_class=21):
+    r"""Preprocess data for evaluation"""
+    h, w, _ = image.shape
+    h_new = round2nearest_multiple(h)
+    w_new = round2nearest_multiple(w)
+    new_image = np.ones((h_new, w_new, 3), dtype=np.uint8)
+    new_image[:h, :w] = image
+    new_mask = np.ones((h_new, w_new), dtype=np.uint8) * ignored_class
+    new_mask[:h, :w] = mask
+    return new_image, new_mask
+
+def round2nearest_multiple(x, p=8):
+    r"""Round x to the nearest multiple of p and x' >= x"""
+    return ((x - 1) // p + 1) * p
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_module", type=str, required=True, help="Model module / package name")
@@ -58,52 +154,31 @@ if __name__ == "__main__":
     parser.add_argument("--label_map_file", type=str, required=True, help="The label map file for VOC-2012 dataset")
     parser.add_argument("--num_workers", type=int, default=8, help="Number of threads used for batch generation")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device used for training and inference")
-    parser.add_argument("--save_dir", type=str, default="tmp/visualization", help="Directory to save visualization results")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to save visualization result")
     args = parser.parse_args()
     print(args)
-
-    # load model
-    from trainers.utils import Logger, bcolors, logits_to_onehot, init_weights
-
+    
     with open(args.model_config_file) as f:
         model_config = json.load(f)
     module = importlib.import_module(args.model_module)
     model = getattr(module, "get_model")(model_config).to(args.device)
-    
-    # load pretrained weights
-    checkpoint_data = torch.load(args.model_weights_file)
-    model.load_state_dict(checkpoint_data["model"])
-    model.eval()
+    ckpt_data = torch.load(args.model_weights_file)
+    model.load_state_dict(ckpt_data["model"])
 
-    # load dataset
     data_config = EasyDict(dict(
         data_root=args.data_root,
         label_map_file=args.label_map_file,
         augment_data=None,
-        preprocess=None,
-        target_size=(256, 256)
+        preprocess=preprocess,
+        ignored_class=21
     ))
-    val_dataset = StandardDataset(data_config, split="val")
-    val_loader = torch.utils.data.DataLoader(
-        dataset=val_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=args.num_workers
-    )
-
-    # evaluation
-    progress_bar = tqdm(enumerate(val_loader), total=len(val_loader))
-    metric_progress = []
-    for step, batch in progress_bar:
-        images = batch["image"].to(args.device)
-        masks, onehot_masks = batch["mask"].to(args.device), batch["onehot_mask"].to(args.device)
-
-        with torch.no_grad():
-            logits = model(images)
-            onehot_pred_masks = logits_to_onehot(logits)
-            iou = IoU(onehot_pred_masks, onehot_masks)
-        
-        visualize(step, images, logits, masks, iou.item(), args.save_dir)
-        metric_progress.append({"iou": iou.item()})
-    metric_progress = pd.DataFrame(metric_progress)
-    metric_progress.to_csv(os.path.join(save_dir, "eval_results.csv"))
+    eval_config = EasyDict(dict(
+        model=model,
+        data_config=data_config,
+        num_workers=args.num_workers,
+        device=args.device,
+        save_dir=args.save_dir
+    ))
+    evaluator = StandardEvaluator(eval_config)
+    evaluator.evaluate()
+    print("Done")

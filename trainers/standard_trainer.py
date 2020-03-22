@@ -16,7 +16,7 @@ from torchvision import models
 from datasets.standard_dataset import StandardDataset
 from augmentators import DeeplabV3Augmentator
 from optimizers import get_quick_optimizer, SlowStartDeeplabV3Scheduler
-from metrics import CELoss, IoU, DICE
+from metrics import CELoss, pixel_acc, IoU, DICE
 from trainers.utils import AverageMeter, Logger, bcolors, logits_to_onehot
 from misc.voc2012_color_map import get_color_map
 
@@ -81,7 +81,7 @@ class StandardTrainer:
         
         val_avg_meters = {"loss": AverageMeter()}
         val_avg_meters.update({metric: AverageMeter() for metric in self.metric_funcs})
-        val_avg_meters = EasyDict(train_avg_meters)
+        val_avg_meters = EasyDict(val_avg_meters)
         
         return train_avg_meters, val_avg_meters
 
@@ -214,7 +214,8 @@ class StandardTrainer:
         r"""Display progress bar"""
         desc = f"{phase} epoch {epoch}/{self.config.n_epochs} step {step}: "
         for metric in meter:
-            desc += f"{metric}: {meter[metric].average():.4f} "
+            avg_metric = meter[metric].average()
+            desc += f"{metric}: {avg_metric:.4f} "
         progress_bar.set_description(desc)
 
 
@@ -243,8 +244,8 @@ if __name__ == "__main__":
         crop_size=(512, 512)
     )
     data_config = EasyDict(dict(
-        data_root="/home/cotai/giang/datasets/VOC-2012",
-        label_map_file="/home/cotai/giang/datasets/VOC-2012/label_map.json",
+        data_root=args.data_root,
+        label_map_file=args.label_map_file,
         augment_data=augmentator,
         preprocess=None,
         target_size=(512, 512),
@@ -253,7 +254,7 @@ if __name__ == "__main__":
     train_config = EasyDict(dict(
         model=model,
         loss_func=CELoss,
-        metric_funcs={"iou": IoU, "dice": DICE},
+        metric_funcs={"pix_acc": pixel_acc, "iou": IoU, "dice": DICE},
         base_lr=1e-3,
         slow_start_lr=5e-5,
         slow_start_step=100,

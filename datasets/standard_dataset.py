@@ -43,7 +43,6 @@ class StandardDataset(Dataset):
                 ```
 
                 leave this `None` if there is no preprocessing step.
-                * target_size (tuple of 2 ints): The target size of images and masks of the dataset. The format is (w, h).
                 * ignored_class (int): The integer used to assign to ignored class 
             split (str): Which split of the dataset to collect. This can be either "train", "trainval", or "val". Default "train".
         
@@ -130,7 +129,6 @@ if __name__ == "__main__":
         label_map_file="/home/cotai/giang/datasets/VOC-2012/label_map.json",
         augment_data=None,
         preprocess=None,
-        target_size=(512, 512),
         ignored_class=21
     ))
     dataset = StandardDataset(data_config, split="train")

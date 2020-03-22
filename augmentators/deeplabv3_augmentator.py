@@ -53,8 +53,8 @@ class DeeplabV3Augmentator:
         pad_bottom = h_pad - h - pad_top
         pad = ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0))
         
-        image = np.pad(image, ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)), mode="constant")
-        mask = np.pad(mask, ((pad_top, pad_bottom), (pad_left, pad_right)), mode="constant")
+        image = np.pad(image, ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)), mode="constant", constant_values=0)
+        mask = np.pad(mask, ((pad_top, pad_bottom), (pad_left, pad_right)), mode="constant", constant_values=self.ignored_class)
         image = cv2.resize(image, (self.w_target, self.h_target), interpolation=cv2.INTER_CUBIC)
         mask = cv2.resize(mask, (self.w_target, self.h_target), interpolation=cv2.INTER_NEAREST)
         return image, mask

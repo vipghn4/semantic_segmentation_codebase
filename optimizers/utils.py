@@ -56,3 +56,8 @@ def UNET_init_weights(m):
         torch.nn.init.xavier_uniform_(m.weight)
         if getattr(m, "bias") is not None:
             m.bias.data.fill_(0.01)
+
+def get_lr(optimizer):
+    r"""Get learning rates of parameter groups of a torch.optim.Optimizer"""
+    lr = [param_group['lr'] for param_group in optimizer.param_groups]
+    return lr

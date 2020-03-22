@@ -65,7 +65,7 @@ class DeeplabV3Augmentator:
         w_crop, h_crop = max(self.w_crop, w), max(self.h_crop, h)
         image = np.pad(image, ((0, h_crop - h), (0, w_crop - w), (0, 0)), mode="constant", constant_values=0)
         mask = np.pad(mask, ((0, h_crop - h), (0, w_crop - w)), mode="constant", constant_values=self.ignored_class)
-        cropped = self.random_crop(image=image, mask=mask) # BUG
+        cropped = self.random_crop(image=image, mask=mask)
         return {"image": cropped["image"], "mask": cropped["mask"]}
 
 

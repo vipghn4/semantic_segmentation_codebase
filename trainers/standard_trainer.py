@@ -15,7 +15,7 @@ from torchvision import models
 
 from datasets.standard_dataset import StandardDataset
 from augmentators import DeeplabV3Augmentator
-from optimizers import get_quick_optimizer
+from optimizers import get_quick_optimizer, SlowStartDeeplabV3Scheduler
 from metrics import CELoss, IoU, DICE
 from trainers.utils import AverageMeter, Logger, bcolors, logits_to_onehot
 from misc.voc2012_color_map import get_color_map
@@ -42,6 +42,9 @@ class StandardTrainer:
                 
                 Each callable object must take ypred and ytrue, which are torch.FloatTensors and returns a torch.FloatTensor.
 
+                * base_lr (float): Base learning rate for optimization.
+                * slow_start_lr (float): Base learning rate for slow-start training phase.
+                * slow_start_step (int): Number of slow-start training steps.
                 * n_epochs (int): Number of training epochs.
                 * data_config (EasyDict): Contain configuration of VOC-2012 dataset to pass into StandardDataset (see its docstring for more details).
                 * batch_size (int): Batch size to be used during training and testing.
@@ -55,13 +58,15 @@ class StandardTrainer:
         self.loss_func = self.config.loss_func
         self.metric_funcs = self.config.metric_funcs
         self.train_dataset, self.train_loader, self.val_dataset, self.val_loader = self.__get_dataloaders()
-        self.optimizer, self.scheduler = self.__get_optimizer()
+        self.optimizer, self.scheduler, self.slow_start_scheduler = self.__get_optimizer()
         self.logger = Logger(self.config.log_dir)
 
     def train(self):
         r"""Train a deep segmentation model"""
         self.best_criteria, self.best_epoch = float('-inf'), -1
         self.last_criteria, self.last_epoch = float('-inf'), -1
+        
+        self.global_training_step = 0
         for epoch in range(self.config.n_epochs):
             self.train_avg_meters, self.val_avg_meters = self.__get_average_meters()
             self.__train_one_epoch(epoch)
@@ -83,8 +88,12 @@ class StandardTrainer:
     def __get_optimizer(self):
         r"""Get optimizer for training segmentation model"""
         max_iter = self.config.n_epochs * math.ceil(len(self.train_loader) / self.config.batch_size)
-        optimizer, scheduler = get_quick_optimizer(model, max_iter, base_lr=1e-4)
-        return optimizer, scheduler
+        optimizer, scheduler = get_quick_optimizer(model, max_iter, base_lr=self.config.base_lr)
+        slow_start_scheduler = SlowStartDeeplabV3Scheduler(
+            optimizer, self.config.base_lr,
+            self.config.slow_start_lr, self.config.slow_start_step
+        )
+        return optimizer, scheduler, slow_start_scheduler
 
     def __get_dataloaders(self):
         r"""Get DataLoader for training and validation sets"""
@@ -122,6 +131,7 @@ class StandardTrainer:
             self.__update_model_params(loss)
             self.__update_average_meters(self.train_avg_meters, metrics)
             self.__display_progress_bar(progress_bar, "Train", epoch, step, self.train_avg_meters)
+            self.global_training_step += 1
         # self.logger.list_of_scalars_summary([], epoch) # TODO
     
     def __update_model_params(self, loss):
@@ -129,7 +139,14 @@ class StandardTrainer:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        self.scheduler.step()
+        self.__update_learning_rate()
+    
+    def __update_learning_rate(self):
+        r"""Adjust learning rate"""
+        if self.global_training_step <= self.config.slow_start_step:
+            self.slow_start_scheduler.step()
+        else:
+            self.scheduler.step()
 
     def __eval_one_epoch(self, epoch):
         r"""Evaluate single epoch"""
@@ -237,6 +254,9 @@ if __name__ == "__main__":
         model=model,
         loss_func=CELoss,
         metric_funcs={"iou": IoU, "dice": DICE},
+        base_lr=1e-3,
+        slow_start_lr=5e-5,
+        slow_start_step=100,
         n_epochs=args.n_epochs,
         data_config=data_config,
         batch_size=args.batch_size,

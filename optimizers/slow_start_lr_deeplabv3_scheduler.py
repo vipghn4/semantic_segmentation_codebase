@@ -15,10 +15,10 @@ class SlowStartDeeplabV3Scheduler(object):
         self.base_lr = base_lr
         self.slow_start_lr = slow_start_lr
         self.slow_start_step = slow_start_step
-        self.step = 0
+        self.current_step = 0
 
     def step(self):
-        self.step += 1
+        self.current_step += 1
         adjusted_slow_start_lr = self.__adjust_slow_start_lr()
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = adjusted_slow_start_lr
@@ -26,5 +26,5 @@ class SlowStartDeeplabV3Scheduler(object):
     def __adjust_slow_start_lr(self):
         adjusted_slow_start_lr = (self.slow_start_lr
                                + (self.base_lr - self.slow_start_lr)
-                               * self.step / self.slow_start_step)
+                               * self.current_step / self.slow_start_step)
         return adjusted_slow_start_lr

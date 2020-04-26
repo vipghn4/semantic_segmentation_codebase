@@ -257,7 +257,7 @@ if __name__ == "__main__":
         metric_funcs={"pix_acc": pixel_acc, "iou": IoU, "dice": DICE},
         base_lr=1e-3,
         slow_start_lr=5e-5,
-        slow_start_step=100,
+        slow_start_step=1,
         n_epochs=args.n_epochs,
         data_config=data_config,
         batch_size=args.batch_size,

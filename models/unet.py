@@ -62,7 +62,7 @@ def get_model(model_config):
     r"""Get UNet model.
     
     Args:
-        model_config (EasyDict): contain model configuration.
+        model_config (EasyDict): Contain model configuration.
             * n_class (int): Number of classes to be classified by the final layer.
     """
     return UNet(**model_config)

@@ -10,7 +10,7 @@ from PIL import Image
 import torch
 from torchvision import transforms
 import torch.nn.functional as F
-from torch.utils.data.dataset import Dataset, ConcatDataset
+from torch.utils.data.dataset import Dataset
 
 from misc.voc2012_color_map import get_color_map
 
@@ -87,7 +87,8 @@ class StandardDataset(Dataset):
         
         if self.config.preprocess is not None:
             image, mask = self.config.preprocess(image, mask)
-                
+        
+        print(type(image))
         image = self.to_tensor(image)
         mask = self.__get_mask_tensor(mask)
         onehot_mask = self.__get_onehot_mask(mask)

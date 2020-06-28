@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from albumentaions import Compose, RandomScale, RandomCrop, VerticalFlip
+from albumentations import Compose, RandomScale, RandomCrop, VerticalFlip
 
 class DeeplabV3Augmentator:
     def __init__(self, ignored_class=21):

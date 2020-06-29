@@ -88,7 +88,6 @@ class StandardDataset(Dataset):
         if self.config.preprocess is not None:
             image, mask = self.config.preprocess(image, mask)
         
-        print(type(image))
         image = self.to_tensor(image)
         mask = self.__get_mask_tensor(mask)
         onehot_mask = self.__get_onehot_mask(mask)
